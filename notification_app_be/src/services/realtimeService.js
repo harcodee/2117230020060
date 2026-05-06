@@ -1,7 +1,6 @@
-// Realtime Service placeholder
-// Uses WebSockets or SSE for pushing live notification updates
+// TODO: Implement WebSockets or SSE for real-time updates later
 function emitNotification(notification) {
-  console.log(`[Realtime] Emitting notification: ${notification.ID}`);
+  console.log(`[Realtime Placeholder] Emitting: ${notification.ID}`);
 }
 
 module.exports = { emitNotification };

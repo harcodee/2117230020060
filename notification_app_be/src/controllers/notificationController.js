@@ -4,7 +4,7 @@ const { rankNotifications } = require("../services/priorityService");
 
 async function getPriorityNotifications(req, res) {
   try {
-    await Log("backend", "info", "controller", "Log route access");
+    await Log("backend", "info", "controller", "Accessed GET /priority");
 
     const notifications = await fetchNotifications();
     const ranked = await rankNotifications(notifications);
@@ -15,10 +15,10 @@ async function getPriorityNotifications(req, res) {
       data: ranked,
     });
   } catch (error) {
-    await Log("backend", "error", "controller", `Log errors: ${error.message}`);
+    await Log("backend", "error", "controller", `Failed to get priority notifications: ${error.message}`);
     res.status(500).json({
       success: false,
-      error: error.message,
+      error: "Internal server error",
     });
   }
 }

@@ -1,11 +1,10 @@
 function calculateRecencyWeight(timestampStr) {
-  const notificationTime = new Date(timestampStr).getTime();
-  const currentTime = new Date().getTime();
-  const diffHours = (currentTime - notificationTime) / (1000 * 60 * 60);
+  const notifTime = new Date(timestampStr).getTime();
+  const now = new Date().getTime();
+  const diffHours = (now - notifTime) / (1000 * 60 * 60);
 
-  // Score decreases as diffHours increases. 100 for immediate, decaying as hours go by.
-  const recencyScore = 100 / (1 + Math.max(0, diffHours));
-  return recencyScore;
+  // Simple decay formula: score drops as diffHours increases
+  return 100 / (1 + Math.max(0, diffHours));
 }
 
 module.exports = { calculateRecencyWeight };

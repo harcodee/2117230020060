@@ -3,6 +3,7 @@ const { calculateRecencyWeight } = require('./timeUtils');
 function calculatePriority(notification) {
   let baseScore = 0;
 
+  // Basic weights for different notification types
   switch (notification.Type) {
     case 'Placement':
       baseScore = 30;
@@ -18,8 +19,6 @@ function calculatePriority(notification) {
   }
 
   const recencyScore = calculateRecencyWeight(notification.Timestamp);
-
-  // Combine static priority weight with dynamic recency weight
   return baseScore + recencyScore;
 }
 

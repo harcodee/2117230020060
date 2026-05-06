@@ -1,194 +1,83 @@
-# Stage 1
+# Notification System Design
 
-## REST API Design
-The notification system exposes a RESTful interface for fetching and ranking notifications.
+## Stage 1: API Design
+- `GET /api/notifications/priority` - Gets the top 10 notifications for the user.
+- **Notification Schema**:
+  ```json
+  {
+    "ID": "UUID",
+    "Type": "Placement | Result | Event",
+    "Message": "String",
+    "Timestamp": "DateTime"
+  }
+  ```
+- **Unread/Read Flow**: The DB stores an `isRead` boolean. We can update this via a `PATCH /api/notifications/:id/read` route when the user clicks a notification.
+- **Realtime**: WebSockets or Server-Sent Events (SSE) would be good here. SSE is simpler if we only need one-way updates (server -> client) when new notifications arrive.
 
-### Endpoint Contracts
-- `GET /api/notifications/priority` - Fetches the top 10 ranked notifications from the remote evaluation service.
+## Stage 2: Database
+- **Choice**: PostgreSQL. Notifications have a rigid structure, and we'll probably need relational queries (like joining with user preferences).
+- **Schema**:
+  ```sql
+  CREATE TABLE notifications (
+      id UUID PRIMARY KEY,
+      student_id INT NOT NULL,
+      type VARCHAR(50),
+      message TEXT,
+      is_read BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+  ```
+- **Indexing**: A composite index on `(student_id, is_read, created_at DESC)` would speed up queries.
+- **Scaling**: We can partition the table by month so older notifications don't slow down current queries.
 
-### Request/Response JSON
-**Response (GET /api/notifications/priority)**:
-```json
-{
-  "success": true,
-  "count": 10,
-  "data": [
-    {
-      "ID": "d146095a-0d86-4a34-9e69-3900a14576bc",
-      "Type": "Placement",
-      "Message": "Google Interview Scheduled",
-      "Timestamp": "2026-05-06 10:51:30",
-      "score": 130
-    }
-  ]
-}
-```
-
-### Headers
-- `Authorization: Bearer <TOKEN>` - Used to securely authenticate to the upstream Evaluation Service.
-- `Content-Type: application/json`
-
-### Status Codes
-- `200 OK` - Success.
-- `401 Unauthorized` - Token missing or expired.
-- `500 Internal Server Error` - Server failed to process the request.
-
-### Notification Schema
-```json
-{
-  "ID": "String (UUID)",
-  "Type": "Enum (Placement, Result, Event)",
-  "Message": "String",
-  "Timestamp": "DateTime"
-}
-```
-
-### Unread Notification Flow
-1. Notification is created in the DB with `isRead = false`.
-2. Client queries for unread items.
-3. Server returns a paginated list of unread notifications.
-
-### Mark-Read Flow
-1. User clicks or interacts with a notification.
-2. Client sends a `PATCH` request to mark it as read.
-3. Server updates `isRead = true` and updates the unread badge count.
-
-### Preferences API
-Allows users to configure which notification types they wish to receive (e.g., opting out of "Event" alerts).
-
-### Pagination & Filtering
-- Supports filtering by `Type`.
-- Uses cursor-based pagination for infinite scrolling to maintain performance on large datasets.
-
-### Realtime Notification Architecture
-The backend uses **WebSockets** or **Server-Sent Events (SSE)**.
-- **WebSocket Explanation**: Bi-directional communication enabling both live push of notifications and instant read-receipt feedback.
-- **SSE Explanation**: Uni-directional (Server -> Client) streaming of text data, perfect for broadcasting notifications where clients don't need to send complex updates back over the same channel.
-
----
-
-# Stage 2
-
-## Database Choice
-**PostgreSQL vs MongoDB**
-PostgreSQL is preferred. Notifications are highly structured and typically require relational joins (e.g., joining with user profiles or preferences). PostgreSQL's strict schema constraints, robust ACID properties, and advanced indexing (like composite indexes for complex filtering) make it superior to MongoDB for this use case.
-
-## Schema Design
+## Stage 3: Query Optimization
+**Slow Query**:
 ```sql
-CREATE TABLE notifications (
-    id UUID PRIMARY KEY,
-    student_id INT NOT NULL,
-    type VARCHAR(50) NOT NULL,
-    message TEXT NOT NULL,
-    is_read BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+SELECT * FROM notifications WHERE studentID = 1042 AND isRead = false ORDER BY createdAt DESC;
 ```
+**Why it's slow**: Without a composite index, Postgres has to filter the rows, then sort them in memory (which is expensive).
 
-## Indexing Strategy
+**Optimized Index**:
 ```sql
-CREATE INDEX idx_student_unread ON notifications(student_id, is_read, created_at DESC);
+CREATE INDEX idx_student_unread ON notifications(studentID, isRead, createdAt DESC);
 ```
+*Note: We shouldn't just index everything because indexes take up disk space and slow down INSERTs/UPDATEs.*
 
-## Scaling Concerns
-- **Partitioning**: Partition the `notifications` table by `created_at` (e.g., weekly or monthly) to manage vast volumes of temporal data efficiently.
-- **Archival Strategy**: Automatically move notifications older than 90 days to cold storage or an archive table.
-- **Caching**: Cache unread notification counts per student in Redis to prevent heavy COUNT() queries on page load.
-
----
-
-# Stage 3
-
-## Slow Query Analysis
+**Recent Placement Notifications Query**:
 ```sql
-SELECT * FROM notifications
-WHERE studentID = 1042 AND isRead = false
-ORDER BY createdAt DESC;
-```
-**Why is it slow?**
-- **Missing Composite Indexes**: Without a proper composite index, the DB must filter by `studentID`, then `isRead`, and finally perform an expensive memory or disk-based sort (FileSort) for `createdAt DESC`.
-- **Complexity**: Full table scans or index scans without sort keys cause extreme CPU and I/O overhead.
-
-## Optimized Index Query
-```sql
-CREATE INDEX idx_notifications_student_read_created
-ON notifications(studentID, isRead, createdAt DESC);
+SELECT DISTINCT student_id FROM notifications 
+WHERE type = 'Placement' AND created_at >= NOW() - INTERVAL '7 days';
 ```
 
-**Why Indexing Every Column is Bad?**
-- **Storage Overhead**: Indexes consume significant disk space and RAM.
-- **Write Amplification**: Every insert or update requires updating multiple B-Trees, heavily degrading write performance.
-- **Maintenance Cost**: More indexes increase the time taken by database vacuums and indexing rebuilds.
+## Stage 4: Polling Issues
+Polling the DB every 5 seconds is going to kill the database when user counts go up.
+- **Solutions**: 
+  - Cache unread counts in Redis.
+  - Push updates via WebSockets/SSE instead of making the client ask for them constantly.
+  - Rate limiting API requests to avoid spam.
 
-## SQL Query: Placement Notifications in Last 7 Days
-```sql
-SELECT DISTINCT student_id 
-FROM notifications 
-WHERE type = 'Placement' 
-  AND created_at >= NOW() - INTERVAL '7 days';
-```
+## Stage 5: Message Queue
+The basic pseudocode blocks the thread and doesn't handle failures well. If the email API goes down, we lose notifications.
 
----
+**Better Architecture**:
+Use a message queue (like RabbitMQ or Redis BullMQ). 
+- The publisher adds the notification to a queue.
+- Background workers process the queue asynchronously.
+- If sending fails, the worker retries. If it fails too many times, it goes to a Dead Letter Queue (DLQ) for debugging.
 
-# Stage 4
-
-## DB Overload from Polling
-Polling (e.g., HTTP requests every 5 seconds) causes massive database connection saturation and CPU spikes, especially as concurrent user counts scale into the thousands.
-
-## Solutions
-- **Redis Caching**: Cache recent or unread notifications so DB hits are minimized.
-- **WebSocket Push / SSE**: Send data to clients only when an event actually occurs, reducing idle network and DB overhead to zero.
-- **Read Replicas**: Distribute heavy `GET` queries across read replicas to protect the primary DB.
-- **CQRS**: Separate the read model from the write model.
-- **Batching & Rate Limiting**: Limit API requests and batch multiple DB inserts together.
-
-**Tradeoffs**:
-WebSockets require stateful connections and complex load balancing (sticky sessions, pub/sub for scaling), which introduces operational complexity compared to stateless HTTP polling.
-
----
-
-# Stage 5
-
-## Flaws in Provided Pseudocode
-(Assuming synchronous loop processing):
-- **Sequential Processing**: Sending notifications sequentially blocks the event loop.
-- **Blocking IO**: Wait times for external APIs (like email/SMS providers) stall the entire queue.
-- **No Retries**: Partial failures mean some users receive notifications while others permanently miss out.
-- **Inconsistent State**: Crashes leave the system unaware of which notifications were successfully dispatched.
-- **Scalability Issues**: A single process cannot handle a burst of 100,000 notifications.
-
-## Improved Solution Architecture
-- **Queue Architecture**: Utilize RabbitMQ, Kafka, or Redis BullMQ.
-- **Worker Consumers**: Run background workers that independently pull and process jobs.
-- **Retry Logic & DLQ**: Exponential backoff for retries; move permanently failed jobs to a Dead Letter Queue (DLQ) for manual inspection.
-- **Async Processing & Idempotency**: Process non-blockingly and guarantee that sending the same payload twice does not result in duplicate emails.
-
-## Improved Pseudocode
 ```javascript
 // Publisher
-async function publishNotification(event) {
-  await queue.publish('notifications_queue', {
-    id: event.id,
-    payload: event.payload
-  });
+async function sendNotification(event) {
+  await queue.add('notify_job', event);
 }
 
-// Consumer Worker
-queue.consume('notifications_queue', async (job) => {
+// Worker
+queue.process('notify_job', async (job) => {
   try {
-    if (await isProcessed(job.id)) return; // Idempotency check
-    
-    await notificationService.send(job.payload);
-    await markProcessed(job.id);
-    
-    job.ack();
-  } catch (err) {
-    if (job.attempts < 3) {
-      job.nack(exponentialBackoff(job.attempts)); // Retry
-    } else {
-      await DLQ.push(job); // Dead Letter Queue
-      job.ack();
-    }
+    await emailService.send(job.data);
+  } catch (error) {
+    if (job.attemptsMade < 3) throw error; // trigger retry
+    else await dlq.add(job); // give up and log it
   }
 });
 ```
