@@ -136,24 +136,18 @@ Reusable logging middleware is integrated throughout:
 ---
 
 # Screenshots
+## API Response - Vehicle Maintenance Scheduler
+<img width="1347" height="852" alt="image" src="https://github.com/user-attachments/assets/d039d973-aac9-4a55-8a56-54fc1f89b4f1" />
 
-## API Response
+## API Response - Notification app
 <img width="1338" height="783" alt="Notification api response" src="https://github.com/user-attachments/assets/693be693-5f2e-4cbc-8baf-cfa3bf25b47e" />
 
 
 ## Folder Structure
-
-![Folder Structure](./screenshots/folder_structure.png)
-
-## Server Running
-
-![Server Running](./screenshots/server_running.png)
+<img width="360" height="769" alt="image" src="https://github.com/user-attachments/assets/680ef13f-d29d-4c7a-a3fa-7916d047df47" />
 
 ## Logging Middleware
-
-![Logging](./screenshots/logging.png)
-
----
+<img width="706" height="413" alt="image" src="https://github.com/user-attachments/assets/79abaa56-6fd9-4759-ac49-713b5d732678" />
 
 # Notes
 
